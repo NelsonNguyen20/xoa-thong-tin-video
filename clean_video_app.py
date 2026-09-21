@@ -11,7 +11,7 @@ from PIL import Image
 # 1. CẤU HÌNH TRANG
 st.set_page_config(page_title="Trạm Xử Lý Đóng Kín", layout="centered")
 
-# 2. HỆ THỐNG MẬT KHẨU
+# 2. HỆ THỐNG MẬT KHẨU BẢO VỆ
 def check_password():
     def password_entered():
         if st.session_state["password"] == "Nelson123":
@@ -36,11 +36,13 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- KHỞI TẠO BỘ NHỚ ĐỆM (CACHE) CHO TÍNH NĂNG LÀM MỚI ---
+# --- KHỞI TẠO BỘ NHỚ ĐỆM (CACHE) ---
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 if "process_done" not in st.session_state:
     st.session_state.process_done = False
+if "processed_files" not in st.session_state:
+    st.session_state.processed_files = []
 
 # 3. HÀM XỬ LÝ MEDIA
 def get_video_dimensions(ffmpeg_exe, input_path):
@@ -104,7 +106,6 @@ crop_percent = st.slider(
     help="Áp dụng cho cả Video và Ảnh. Trượt về 1% nếu chỉ muốn phá thủy vân ẩn mà không bị mất góc ảnh quá nhiều."
 )
 
-# Chú ý: Đã thêm khóa key động để có thể xóa trắng dữ liệu
 uploaded_files = st.file_uploader(
     "Kéo thả hàng loạt Video hoặc Ảnh vào đây", 
     type=["mp4", "mov", "jpg", "jpeg", "png", "webp"], 
@@ -112,7 +113,7 @@ uploaded_files = st.file_uploader(
     key=f"uploader_{st.session_state.uploader_key}"
 )
 
-# Nếu có file tải lên và chưa hoàn tất xử lý
+# XỬ LÝ DỮ LIỆU
 if uploaded_files and not st.session_state.process_done:
     st.code(f"> SYSTEM LOG: Detected {len(uploaded_files)} media files.\n> STATUS: Ready for extraction & cleansing...", language="bash")
     
@@ -120,6 +121,9 @@ if uploaded_files and not st.session_state.process_done:
         zip_buffer = io.BytesIO()
         progress_bar = st.progress(0)
         status_text = st.empty()
+        
+        # Xóa list cũ trước khi chạy đợt mới
+        st.session_state.processed_files = []
         
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
             for i, uploaded_file in enumerate(uploaded_files):
@@ -139,8 +143,19 @@ if uploaded_files and not st.session_state.process_done:
                 
                 if success:
                     with open(output_path, "rb") as f:
+                        file_bytes = f.read()
                         clean_filename = uploaded_file.name.rsplit('.', 1)[0] + f"_cleaned.{ext}"
-                        zip_file.writestr(clean_filename, f.read())
+                        
+                        # Ghi vào ZIP
+                        zip_file.writestr(clean_filename, file_bytes)
+                        
+                        # Lưu vào bộ nhớ để hiển thị trên Mobile
+                        st.session_state.processed_files.append({
+                            "name": clean_filename,
+                            "data": file_bytes,
+                            "type": "video" if ext in ['mp4', 'mov'] else "image",
+                            "mime": f"video/{ext}" if ext in ['mp4', 'mov'] else f"image/{ext}"
+                        })
                 else:
                     st.error(f"Lỗi khi xử lý {uploaded_file.name}: {error_msg}")
                 
@@ -151,29 +166,48 @@ if uploaded_files and not st.session_state.process_done:
                     
                 progress_bar.progress((i + 1) / len(uploaded_files))
         
-        # Lưu kết quả vào bộ nhớ tạm (Cache) để tải xuống an toàn
         status_text.empty()
         progress_bar.empty()
         st.session_state.zip_data = zip_buffer.getvalue()
         st.session_state.process_done = True
         st.rerun()
 
-# --- GIAO DIỆN TẢI XUỐNG VÀ NÚT LÀM MỚI ---
+# --- GIAO DIỆN TẢI XUỐNG DÀNH CHO MOBILE & PC ---
 if st.session_state.process_done:
-    st.code("> EXECUTION COMPLETE.\n> METADATA: STRIPPED.\n> SYNTH-ID: BYPASSED.\n> AWAITING DOWNLOAD...", language="bash")
+    st.code("> EXECUTION COMPLETE.\n> METADATA: STRIPPED.\n> SYNTH-ID: BYPASSED.\n> READY FOR DIRECT DOWNLOAD...", language="bash")
     
+    st.write("### Thành phẩm của bạn:")
+    
+    # Hiển thị từng file để người dùng Mobile dễ lưu
+    for file_info in st.session_state.processed_files:
+        with st.container():
+            if file_info["type"] == "image":
+                st.image(file_info["data"], caption=file_info["name"])
+            else:
+                st.video(file_info["data"])
+            
+            st.download_button(
+                label=f"⬇️ Tải xuống {file_info['name']}",
+                data=file_info["data"],
+                file_name=file_info["name"],
+                mime=file_info["mime"],
+                key=f"dl_{file_info['name']}"
+            )
+            st.write("---")
+    
+    # Nút tải file ZIP dự phòng cho PC
     st.download_button(
-        label="Tải toàn bộ thành phẩm (File ZIP)",
+        label="📦 Tải toàn bộ thành phẩm (File ZIP)",
         data=st.session_state.zip_data,
         file_name="cleaned_media_batch.zip",
-        mime="application/zip"
+        mime="application/zip",
+        type="primary"
     )
-    
-    st.write("---")
     
     # Nút dọn dẹp Cache và tải lại uploader
     if st.button("🔄 Làm mới & Tải đợt khác"):
         st.session_state.uploader_key += 1
         st.session_state.process_done = False
+        st.session_state.processed_files = []
         del st.session_state.zip_data
         st.rerun()
