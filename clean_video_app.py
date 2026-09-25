@@ -65,7 +65,8 @@ def clean_and_delogo_ai_video(input_path, output_path, crop_percent):
     command = [
         ffmpeg_exe, "-y", "-i", input_path,
         "-map_metadata", "-1",  
-        "-an",                  
+        "-c:a", "aac",          # Ép mã hóa lại âm thanh sang định dạng AAC để phá thủy vân AI
+        "-b:a", "192k",         # Nén với bitrate 192kbps để giữ chất lượng cao
         "-vf", f"crop={crop_w}:{crop_h}:0:0,scale={width}:{height},noise=alls=1:allf=t,eq=contrast=1.02",
         "-c:v", "libx264",      
         "-crf", "17",           
